@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from './supabaseClient';
 import { 
   Check, 
   Copy, 
@@ -348,7 +349,7 @@ export default function App() {
   };
 
   // Handle VIP Member Sign In
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     
@@ -359,44 +360,46 @@ export default function App() {
 
     setAuthLoading(true);
 
-    setTimeout(() => {
-      // Find matching user in members
-      const foundUser = members.find(
-        m => m.email.toLowerCase() === signinEmail.toLowerCase() && m.password === signinPassword
-      );
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: signinEmail,
+        password: signinPassword
+      });
 
-      if (!foundUser) {
-        // Fallback check to allow tester account if members state is out of sync
-        if (signinEmail.toLowerCase() === 'tester@obelii.com' && signinPassword === 'obelii2026') {
-          const testMember: MemberUser = {
-            name: "Avery Sterling",
-            email: "tester@obelii.com",
-            password: "obelii2026",
-            id: "OB-00100",
-            joinedAt: new Date().toISOString(),
-            tier: "PLATINUM FOUNDER",
-            points: 450
-          };
-          setCurrentUser(testMember);
-          localStorage.setItem('obelii_current_member', JSON.stringify(testMember));
-          setActiveView('member');
-          setAuthLoading(false);
-          return;
-        }
-        setAuthError('Invalid credentials. Double check your email and password.');
+      if (error) {
+        setAuthError(error.message);
         setAuthLoading(false);
         return;
       }
 
-      setCurrentUser(foundUser);
-      localStorage.setItem('obelii_current_member', JSON.stringify(foundUser));
-      setActiveView('member');
+      // Successful login
+      const userEmail = data.user?.email || signinEmail;
+      const userName = data.user?.user_metadata?.name || userEmail.split('@')[0];
+      const userId = data.user?.id || `OB-${Math.floor(10200 + Math.random() * 89000)}`;
+
+      const loggedInUser: MemberUser = {
+        name: userName,
+        email: userEmail,
+        id: userId,
+        joinedAt: new Date().toISOString(),
+        tier: "FOUNDING MEMBER",
+        points: 100
+      };
+
+      setCurrentUser(loggedInUser);
+      localStorage.setItem('obelii_current_member', JSON.stringify(loggedInUser));
+      
+      setActiveView('waitlist'); // Redirect to Home ("/")
       setAuthLoading(false);
-    }, 1000);
+      triggerBoutiqueNotification(`Welcome back, ${userName}. Signed in successfully.`);
+    } catch (err: any) {
+      setAuthError(err?.message || 'An unexpected error occurred during sign-in.');
+      setAuthLoading(false);
+    }
   };
 
   // Handle VIP Member Sign Up
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
 
@@ -418,21 +421,32 @@ export default function App() {
 
     setAuthLoading(true);
 
-    setTimeout(() => {
-      // Check for duplicate account
-      const isDuplicate = members.some(m => m.email.toLowerCase() === signupEmail.toLowerCase());
-      if (isDuplicate) {
-        setAuthError('An account with this email already exists.');
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: signupEmail,
+        password: signupPassword,
+        options: {
+          data: {
+            name: signupName
+          }
+        }
+      });
+
+      if (error) {
+        setAuthError(error.message);
         setAuthLoading(false);
         return;
       }
 
-      const randomIdNum = Math.floor(10200 + Math.random() * 89000);
+      // Successful signup
+      const userEmail = data.user?.email || signupEmail;
+      const userName = data.user?.user_metadata?.name || signupName;
+      const userId = data.user?.id || `OB-${Math.floor(10200 + Math.random() * 89000)}`;
+
       const newMember: MemberUser = {
-        name: signupName,
-        email: signupEmail,
-        password: signupPassword,
-        id: `OB-${randomIdNum}`,
+        name: userName,
+        email: userEmail,
+        id: userId,
         joinedAt: new Date().toISOString(),
         tier: "FOUNDING MEMBER",
         points: 100
@@ -463,10 +477,13 @@ export default function App() {
         setTotalSignups(totalSignups + 1);
       }
 
-      setActiveView('member');
+      setActiveView('waitlist'); // Redirect to Home ("/")
       setAuthLoading(false);
       triggerBoutiqueNotification('Account created successfully. Welcome to Obelii.');
-    }, 1200);
+    } catch (err: any) {
+      setAuthError(err?.message || 'An unexpected error occurred during sign-up.');
+      setAuthLoading(false);
+    }
   };
 
   // Handle Google OAuth Action
@@ -911,21 +928,34 @@ export default function App() {
 
                     {/* Member Account Navigation Options */}
                     <div className="mt-10 pt-6 border-t border-white/5 flex flex-col sm:flex-row gap-4 justify-between items-center text-xs text-white/40">
-                      <span className="font-light">Already our launch partner?</span>
+                      <span className="font-light">
+                        {currentUser ? `Signed in as ${currentUser.name}` : 'Already our launch partner?'}
+                      </span>
                       <div className="flex items-center gap-4">
-                        <button 
-                          onClick={() => { setActiveView('signin'); setAuthError(''); }} 
-                          className="text-[#00e154] hover:underline hover:text-[#00e154]/80 transition-colors font-medium flex items-center gap-1"
-                        >
-                          <LogIn className="w-3.5 h-3.5" /> Sign In
-                        </button>
-                        <span className="text-white/10">|</span>
-                        <button 
-                          onClick={() => { setActiveView('signup'); setAuthError(''); }} 
-                          className="text-white/60 hover:text-white hover:underline transition-colors flex items-center gap-1"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" /> Create Account
-                        </button>
+                        {currentUser ? (
+                          <button 
+                            onClick={() => { setActiveView('member'); }} 
+                            className="text-[#00e154] hover:underline hover:text-[#00e154]/80 transition-colors font-medium flex items-center gap-1.5"
+                          >
+                            <Award className="w-3.5 h-3.5" /> Enter VIP Lounge
+                          </button>
+                        ) : (
+                          <>
+                            <button 
+                              onClick={() => { setActiveView('signin'); setAuthError(''); }} 
+                              className="text-[#00e154] hover:underline hover:text-[#00e154]/80 transition-colors font-medium flex items-center gap-1"
+                            >
+                              <LogIn className="w-3.5 h-3.5" /> Sign In
+                            </button>
+                            <span className="text-white/10">|</span>
+                            <button 
+                              onClick={() => { setActiveView('signup'); setAuthError(''); }} 
+                              className="text-white/60 hover:text-white hover:underline transition-colors flex items-center gap-1"
+                            >
+                              <UserPlus className="w-3.5 h-3.5" /> Create Account
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
