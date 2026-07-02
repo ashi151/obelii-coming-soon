@@ -144,6 +144,14 @@ export default function App() {
   const [googleCustomName, setGoogleCustomName] = useState('');
   const [googleCustomEmail, setGoogleCustomEmail] = useState('');
   const [showGoogleCustomInput, setShowGoogleCustomInput] = useState(false);
+  const [savedGoogleAccounts, setSavedGoogleAccounts] = useState<{email: string, name: string}[]>(() => {
+    try {
+      const saved = localStorage.getItem('obelii_saved_google_accounts');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   
   // Admin Panel states
   const [adminOpen, setAdminOpen] = useState(false);
@@ -510,6 +518,17 @@ export default function App() {
         triggerBoutiqueNotification(`Welcome back, ${foundUser.name}. Signed in with Google.`);
       }
       
+      // Dynamic: save this Google account to savedGoogleAccounts so it is remembered locally
+      setSavedGoogleAccounts(prev => {
+        const exists = prev.some(acc => acc.email.toLowerCase() === emailStr.toLowerCase());
+        if (!exists) {
+          const updated = [...prev, { email: emailStr, name: nameStr }];
+          localStorage.setItem('obelii_saved_google_accounts', JSON.stringify(updated));
+          return updated;
+        }
+        return prev;
+      });
+
       setCurrentUser(foundUser);
       localStorage.setItem('obelii_current_member', JSON.stringify(foundUser));
       setActiveView('member');
@@ -1788,43 +1807,33 @@ export default function App() {
                       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05" />
                       <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335" strokeLinecap="round" />
                     </svg>
-                    <h3 className="text-xl font-bold text-white tracking-tight font-sans-luxury">Choose an account</h3>
+                    <h3 className="text-xl font-bold text-white tracking-tight font-sans-luxury">
+                      {savedGoogleAccounts.length > 0 && !showGoogleCustomInput ? 'Choose an account' : 'Sign in with Google'}
+                    </h3>
                     <p className="text-[11px] text-white/50 mt-1 font-light">to continue to <span className="font-semibold text-white">Obelii Lounge</span></p>
                   </div>
 
                   {/* Account List / Selection */}
-                  {!showGoogleCustomInput ? (
+                  {savedGoogleAccounts.length > 0 && !showGoogleCustomInput ? (
                     <div className="space-y-2 mb-6">
-                      {/* Personalized Option for user email ashiquenazzpp@gmail.com */}
-                      <button
-                        onClick={() => handleGoogleSignIn('ashiquenazzpp@gmail.com', 'Ashique N')}
-                        className="w-full text-left bg-white/[0.02] hover:bg-white/5 border border-white/5 hover:border-white/10 rounded-2xl p-3 transition-all duration-200 flex items-center gap-3.5 group cursor-pointer"
-                      >
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-green-600 to-[#00e154] text-white font-bold flex items-center justify-center text-sm shadow-md select-none">
-                          A
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-white group-hover:text-[#00e154] transition-colors">Ashique N</p>
-                          <p className="text-[10px] text-white/45 truncate">ashiquenazzpp@gmail.com</p>
-                        </div>
-                        <div className="text-[9px] px-2 py-0.5 rounded-md bg-[#00e154]/10 text-[#00e154] font-medium tracking-wide">
-                          Owner
-                        </div>
-                      </button>
-
-                      {/* Default Guest Option */}
-                      <button
-                        onClick={() => handleGoogleSignIn('obelii.member@gmail.com', 'Avery Sterling')}
-                        className="w-full text-left bg-white/[0.02] hover:bg-white/5 border border-white/5 hover:border-white/10 rounded-2xl p-3 transition-all duration-200 flex items-center gap-3.5 group cursor-pointer"
-                      >
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-bold flex items-center justify-center text-sm shadow-md select-none">
-                          O
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-white group-hover:text-blue-400 transition-colors">Avery Sterling</p>
-                          <p className="text-[10px] text-white/45 truncate">obelii.member@gmail.com</p>
-                        </div>
-                      </button>
+                      {savedGoogleAccounts.map((acc, idx) => {
+                        const initialLetter = acc.name ? acc.name.charAt(0).toUpperCase() : 'G';
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => handleGoogleSignIn(acc.email, acc.name)}
+                            className="w-full text-left bg-white/[0.02] hover:bg-white/5 border border-white/5 hover:border-white/10 rounded-2xl p-3 transition-all duration-200 flex items-center gap-3.5 group cursor-pointer"
+                          >
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-bold flex items-center justify-center text-sm shadow-md select-none">
+                              {initialLetter}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-white group-hover:text-blue-400 transition-colors">{acc.name}</p>
+                              <p className="text-[10px] text-white/45 truncate">{acc.email}</p>
+                            </div>
+                          </button>
+                        );
+                      })}
 
                       {/* Custom Input Trigger */}
                       <button
@@ -1875,16 +1884,20 @@ export default function App() {
                       </div>
 
                       <div className="flex gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowGoogleCustomInput(false)}
-                          className="w-1/2 bg-white/5 hover:bg-white/10 text-white font-medium text-xs py-2.5 rounded-full transition-colors cursor-pointer"
-                        >
-                          Back
-                        </button>
+                        {savedGoogleAccounts.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowGoogleCustomInput(false)}
+                            className="w-1/2 bg-white/5 hover:bg-white/10 text-white font-medium text-xs py-2.5 rounded-full transition-colors cursor-pointer"
+                          >
+                            Back
+                          </button>
+                        )}
                         <button
                           type="submit"
-                          className="w-1/2 bg-white hover:bg-white/95 text-black font-semibold text-xs py-2.5 rounded-full shadow-lg transition-all cursor-pointer"
+                          className={`bg-white hover:bg-white/95 text-black font-semibold text-xs py-2.5 rounded-full shadow-lg transition-all cursor-pointer ${
+                            savedGoogleAccounts.length > 0 ? 'w-1/2' : 'w-full'
+                          }`}
                         >
                           Authorize
                         </button>
