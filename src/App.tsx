@@ -127,6 +127,7 @@ export default function App() {
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authSuccessMessage, setAuthSuccessMessage] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [members, setMembers] = useState<MemberUser[]>([]);
   const [currentUser, setCurrentUser] = useState<MemberUser | null>(null);
@@ -228,16 +229,42 @@ export default function App() {
     }
 
     // Check for active login session
-    const savedSession = localStorage.getItem('obelii_current_member');
-    if (savedSession) {
+    const restoreSession = async () => {
       try {
-        const parsedUser = JSON.parse(savedSession);
-        setCurrentUser(parsedUser);
-        setActiveView('member');
-      } catch (e) {
-        console.error("Error restoring session", e);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const userEmail = session.user?.email || '';
+          const userName = session.user?.user_metadata?.name || userEmail.split('@')[0];
+          const userId = session.user?.id || `OB-${Math.floor(10200 + Math.random() * 89000)}`;
+
+          const loggedInUser: MemberUser = {
+            name: userName,
+            email: userEmail,
+            id: userId,
+            joinedAt: session.user?.created_at || new Date().toISOString(),
+            tier: "FOUNDING MEMBER",
+            points: 100
+          };
+          setCurrentUser(loggedInUser);
+          localStorage.setItem('obelii_current_member', JSON.stringify(loggedInUser));
+          setActiveView('member');
+        } else {
+          const savedSession = localStorage.getItem('obelii_current_member');
+          if (savedSession) {
+            try {
+              const parsedUser = JSON.parse(savedSession);
+              setCurrentUser(parsedUser);
+              setActiveView('member');
+            } catch (e) {
+              console.error("Error restoring session", e);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error restoring session from Supabase", err);
       }
-    }
+    };
+    restoreSession();
 
     // Load member interactive wishlist & pre-orders
     const savedWishlist = localStorage.getItem('obelii_wishlist');
@@ -270,6 +297,30 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, []);
+
+  // Protect private views (member lounge) dynamically
+  useEffect(() => {
+    const protectRoute = async () => {
+      if (activeView === 'member') {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+            setCurrentUser(null);
+            localStorage.removeItem('obelii_current_member');
+            setActiveView('signin');
+            setAuthError('Please sign in to access the private VIP Lounge.');
+          }
+        } catch (err) {
+          console.error("Error verifying route protection session", err);
+          setCurrentUser(null);
+          localStorage.removeItem('obelii_current_member');
+          setActiveView('signin');
+          setAuthError('Session verification failed. Please sign in again.');
+        }
+      }
+    };
+    protectRoute();
+  }, [activeView]);
 
   // Handle Fullscreen Toggle
   const toggleFullscreen = () => {
@@ -352,6 +403,7 @@ export default function App() {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+    setAuthSuccessMessage('');
     
     if (!signinEmail || !signinPassword) {
       setAuthError('Please fill in all credentials.');
@@ -372,6 +424,13 @@ export default function App() {
         return;
       }
 
+      // ONLY redirect when a real session exists after login
+      if (!data.session) {
+        setAuthError('Authentication succeeded but no active session was returned. Please try again.');
+        setAuthLoading(false);
+        return;
+      }
+
       // Successful login
       const userEmail = data.user?.email || signinEmail;
       const userName = data.user?.user_metadata?.name || userEmail.split('@')[0];
@@ -381,7 +440,7 @@ export default function App() {
         name: userName,
         email: userEmail,
         id: userId,
-        joinedAt: new Date().toISOString(),
+        joinedAt: data.user?.created_at || new Date().toISOString(),
         tier: "FOUNDING MEMBER",
         points: 100
       };
@@ -402,6 +461,7 @@ export default function App() {
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+    setAuthSuccessMessage('');
 
     if (!signupName || !signupEmail || !signupPassword) {
       setAuthError('Please fill in all fields.');
@@ -438,7 +498,14 @@ export default function App() {
         return;
       }
 
-      // Successful signup
+      // Successful signup but requires email verification
+      if (!data.session) {
+        setAuthSuccessMessage("Check your email and confirm your account before logging in.");
+        setAuthLoading(false);
+        return;
+      }
+
+      // Successful signup with auto-login (direct session returned)
       const userEmail = data.user?.email || signupEmail;
       const userName = data.user?.user_metadata?.name || signupName;
       const userId = data.user?.id || `OB-${Math.floor(10200 + Math.random() * 89000)}`;
@@ -447,7 +514,7 @@ export default function App() {
         name: userName,
         email: userEmail,
         id: userId,
-        joinedAt: new Date().toISOString(),
+        joinedAt: data.user?.created_at || new Date().toISOString(),
         tier: "FOUNDING MEMBER",
         points: 100
       };
@@ -559,7 +626,12 @@ export default function App() {
   };
 
   // Handle Sign Out
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error("Error signing out from Supabase", err);
+    }
     setCurrentUser(null);
     localStorage.removeItem('obelii_current_member');
     setActiveView('waitlist');
@@ -569,6 +641,7 @@ export default function App() {
     setSignupEmail('');
     setSignupPassword('');
     setAuthError('');
+    setAuthSuccessMessage('');
   };
 
   // Toggle Item Wishlist
@@ -1103,6 +1176,16 @@ export default function App() {
                     </motion.div>
                   )}
 
+                  {authSuccessMessage && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-xs text-emerald-400 font-medium text-center bg-emerald-500/10 border border-emerald-500/20 py-2.5 px-4 rounded-xl"
+                    >
+                      {authSuccessMessage}
+                    </motion.div>
+                  )}
+
                   <motion.button
                     whileHover={{ scale: 1.01 }}
                     whileTap={{ scale: 0.99 }}
@@ -1233,6 +1316,16 @@ export default function App() {
                       className="text-xs text-red-400 font-light text-center"
                     >
                       {authError}
+                    </motion.div>
+                  )}
+
+                  {authSuccessMessage && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-xs text-emerald-400 font-medium text-center bg-emerald-500/10 border border-emerald-500/20 py-2.5 px-4 rounded-xl"
+                    >
+                      {authSuccessMessage}
                     </motion.div>
                   )}
 
