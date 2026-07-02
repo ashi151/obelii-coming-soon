@@ -614,6 +614,27 @@ export default function App() {
     }, 1500);
   };
 
+  // Handle Supabase Google OAuth
+  const handleSupabaseGoogleLogin = async () => {
+    try {
+      setAuthLoading(true);
+      setAuthError('');
+      setAuthSuccessMessage('');
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) {
+        throw error;
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || 'An error occurred during Google Sign In.');
+      setAuthLoading(false);
+    }
+  };
+
   // Handle Sign Out
   const handleSignOut = async () => {
     try {
@@ -1202,7 +1223,7 @@ export default function App() {
                     whileHover={{ scale: 1.01 }}
                     whileTap={{ scale: 0.99 }}
                     type="button"
-                    onClick={() => { setGoogleAuthOpen(true); setAuthError(''); }}
+                    onClick={handleSupabaseGoogleLogin}
                     className="w-full bg-[#12141c] hover:bg-[#161a24] border border-white/10 text-white py-3.5 rounded-full font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2.5 cursor-pointer"
                   >
                     <svg className="w-4 h-4" viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
@@ -1345,7 +1366,7 @@ export default function App() {
                     whileHover={{ scale: 1.01 }}
                     whileTap={{ scale: 0.99 }}
                     type="button"
-                    onClick={() => { setGoogleAuthOpen(true); setAuthError(''); }}
+                    onClick={handleSupabaseGoogleLogin}
                     className="w-full bg-[#12141c] hover:bg-[#161a24] border border-white/10 text-white py-3.5 rounded-full font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2.5 cursor-pointer"
                   >
                     <svg className="w-4 h-4" viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
