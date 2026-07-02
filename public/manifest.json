@@ -1,0 +1,17 @@
+{
+  "name": "Obelii Boutique Shop",
+  "short_name": "Obelii",
+  "description": "Obelii High-End Boutique Fashion & Lifestyle Waitlist and Shop",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0b10",
+  "theme_color": "#0a0b10",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

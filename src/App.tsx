@@ -137,6 +137,7 @@ export default function App() {
   // Boutique interactive states
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [preorders, setPreorders] = useState<string[]>([]);
+  const [regionPref, setRegionPref] = useState('European Union');
   const [boutiqueNotification, setBoutiqueNotification] = useState('');
   
   // Google Auth interactive states
@@ -170,91 +171,161 @@ export default function App() {
     setMousePosition({ x, y });
   };
 
-  // Load waitlist and VIP member data from LocalStorage on mount
+  // Load waitlist and VIP member data from Supabase/LocalStorage on mount
   useEffect(() => {
-    const savedList = localStorage.getItem('obelii_waitlist');
-    const savedCount = localStorage.getItem('obelii_total_signups');
-    
-    let initialWaitlist: WaitlistEntry[] = [];
-    if (savedList) {
+    const fetchWaitlistAndSeeding = async () => {
       try {
-        initialWaitlist = JSON.parse(savedList);
-      } catch (e) {
-        console.error("Error parsing waitlist", e);
+        const { data, error } = await supabase.from('waitlist').select('*').order('position', { ascending: false });
+        
+        if (error || !data || data.length === 0) {
+          // If there's an error (e.g. table not created yet) or no rows, fall back to local storage or seed
+          const savedList = localStorage.getItem('obelii_waitlist');
+          const savedCount = localStorage.getItem('obelii_total_signups');
+          
+          let initialWaitlist: WaitlistEntry[] = [];
+          if (savedList) {
+            try {
+              initialWaitlist = JSON.parse(savedList);
+            } catch (e) {}
+          } else {
+            initialWaitlist = [
+              { email: 'curator@luxe-ateliers.co', timestamp: new Date(Date.now() - 4 * 3600000).toISOString(), position: 1283 },
+              { email: 'monocle.editor@aesthetic.org', timestamp: new Date(Date.now() - 14 * 3600000).toISOString(), position: 1282 },
+              { email: 'minimalist.architect@soma.design', timestamp: new Date(Date.now() - 28 * 3600000).toISOString(), position: 1281 },
+              { email: 'sterling.lux@curated.life', timestamp: new Date(Date.now() - 36 * 3600000).toISOString(), position: 1280 }
+            ];
+            localStorage.setItem('obelii_waitlist', JSON.stringify(initialWaitlist));
+            
+            // Try to seed database waitlist table if it exists
+            try {
+              const seedList = initialWaitlist.map(w => ({
+                email: w.email,
+                position: w.position,
+                created_at: w.timestamp
+              }));
+              await supabase.from('waitlist').insert(seedList);
+            } catch (dbErr) {
+              console.log("Waitlist table might not be created yet, using localStorage fallback.");
+            }
+          }
+          setWaitlist(initialWaitlist);
+          
+          if (savedCount) {
+            const parsedCount = parseInt(savedCount, 10);
+            setTotalSignups(parsedCount);
+            setQueuePosition(parsedCount + 1);
+          } else {
+            setTotalSignups(1283);
+            setQueuePosition(1284);
+            localStorage.setItem('obelii_total_signups', '1283');
+          }
+        } else {
+          // Successfully loaded from Supabase!
+          const loadedWaitlist = data.map(d => ({
+            email: d.email,
+            timestamp: d.created_at || new Date().toISOString(),
+            position: d.position
+          }));
+          setWaitlist(loadedWaitlist);
+          const maxPos = Math.max(...loadedWaitlist.map(d => d.position), 1283);
+          setTotalSignups(maxPos);
+          setQueuePosition(maxPos + 1);
+          localStorage.setItem('obelii_waitlist', JSON.stringify(loadedWaitlist));
+          localStorage.setItem('obelii_total_signups', maxPos.toString());
+        }
+      } catch (err) {
+        console.error("Error in waitlist loading process", err);
       }
-    } else {
-      // Pre-seed premium subscribers to make the dashboard look stunning immediately
-      initialWaitlist = [
-        { email: 'curator@luxe-ateliers.co', timestamp: new Date(Date.now() - 4 * 3600000).toISOString(), position: 1283 },
-        { email: 'monocle.editor@aesthetic.org', timestamp: new Date(Date.now() - 14 * 3600000).toISOString(), position: 1282 },
-        { email: 'minimalist.architect@soma.design', timestamp: new Date(Date.now() - 28 * 3600000).toISOString(), position: 1281 },
-        { email: 'sterling.lux@curated.life', timestamp: new Date(Date.now() - 36 * 3600000).toISOString(), position: 1280 }
-      ];
-      localStorage.setItem('obelii_waitlist', JSON.stringify(initialWaitlist));
-    }
-    setWaitlist(initialWaitlist);
-    
-    if (savedCount) {
-      const parsedCount = parseInt(savedCount, 10);
-      setTotalSignups(parsedCount);
-      setQueuePosition(parsedCount + 1);
-    } else {
-      localStorage.setItem('obelii_total_signups', '1283');
-    }
+    };
+    fetchWaitlistAndSeeding();
 
-    // Initialize VIP members database in LocalStorage
-    const savedMembers = localStorage.getItem('obelii_members');
-    let parsedMembers: MemberUser[] = [];
-    if (savedMembers) {
-      try {
-        parsedMembers = JSON.parse(savedMembers);
-        setMembers(parsedMembers);
-      } catch (e) {
-        console.error("Error parsing members", e);
-      }
-    } else {
-      // Create developer test account for simple demo sign-in
-      const defaultMember: MemberUser = {
-        name: "Avery Sterling",
-        email: "tester@obelii.com",
-        password: "obelii2026",
-        id: "OB-00100",
-        joinedAt: new Date().toISOString(),
-        tier: "PLATINUM FOUNDER",
-        points: 450
-      };
-      parsedMembers = [defaultMember];
-      localStorage.setItem('obelii_members', JSON.stringify(parsedMembers));
-      setMembers(parsedMembers);
-    }
-
-    // Check for active login session
+    // Check for active login session and restore profile, wishlist, and preorders from Supabase
     const restoreSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           const userEmail = session.user?.email || '';
+          const userId = session.user?.id || '';
           const userName = session.user?.user_metadata?.name || userEmail.split('@')[0];
-          const userId = session.user?.id || `OB-${Math.floor(10200 + Math.random() * 89000)}`;
 
-          const loggedInUser: MemberUser = {
+          // Fetch profile details or upsert
+          let profile = null;
+          try {
+            const { data: pData } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+            profile = pData;
+            if (!profile) {
+              const defaultProfile = {
+                id: userId,
+                name: userName,
+                email: userEmail,
+                tier: "FOUNDING MEMBER",
+                points: 100,
+                region_preference: "European Union"
+              };
+              await supabase.from('profiles').insert(defaultProfile);
+              profile = defaultProfile;
+            }
+          } catch (pErr) {
+            console.log("Profiles table might not exist yet. Using mock fallback.", pErr);
+          }
+
+          const resolvedProfile = profile || {
+            id: userId,
             name: userName,
             email: userEmail,
-            id: userId,
-            joinedAt: session.user?.created_at || new Date().toISOString(),
             tier: "FOUNDING MEMBER",
-            points: 100
+            points: 100,
+            region_preference: "European Union"
+          };
+
+          // Fetch wishlist and preorders
+          let resolvedWishlist: string[] = [];
+          let resolvedPreorders: string[] = [];
+          try {
+            const { data: wishData } = await supabase.from('wishlist_items').select('product_id').eq('user_id', userId);
+            if (wishData) resolvedWishlist = wishData.map(w => w.product_id);
+            
+            const { data: preData } = await supabase.from('preorders').select('product_id').eq('user_id', userId);
+            if (preData) resolvedPreorders = preData.map(p => p.product_id);
+          } catch (dbErr) {
+            console.log("Wishlist/Preorders tables might not exist yet, fallback to localStorage.", dbErr);
+            const savedWishlist = localStorage.getItem('obelii_wishlist');
+            if (savedWishlist) resolvedWishlist = JSON.parse(savedWishlist);
+            const savedPreorders = localStorage.getItem('obelii_preorders');
+            if (savedPreorders) resolvedPreorders = JSON.parse(savedPreorders);
+          }
+
+          setWishlist(resolvedWishlist);
+          setPreorders(resolvedPreorders);
+          setRegionPref(resolvedProfile.region_preference || 'European Union');
+
+          const loggedInUser: MemberUser = {
+            name: resolvedProfile.name,
+            email: resolvedProfile.email,
+            id: resolvedProfile.id,
+            joinedAt: session.user?.created_at || new Date().toISOString(),
+            tier: resolvedProfile.tier,
+            points: resolvedProfile.points
           };
           setCurrentUser(loggedInUser);
           localStorage.setItem('obelii_current_member', JSON.stringify(loggedInUser));
+          localStorage.setItem('obelii_region_pref', resolvedProfile.region_preference || 'European Union');
           setActiveView('member');
         } else {
+          // LocalStorage fallback for offline demonstration
           const savedSession = localStorage.getItem('obelii_current_member');
           if (savedSession) {
             try {
               const parsedUser = JSON.parse(savedSession);
               setCurrentUser(parsedUser);
               setActiveView('member');
+              
+              const savedWishlist = localStorage.getItem('obelii_wishlist');
+              if (savedWishlist) setWishlist(JSON.parse(savedWishlist));
+              const savedPreorders = localStorage.getItem('obelii_preorders');
+              if (savedPreorders) setPreorders(JSON.parse(savedPreorders));
+              const savedRegion = localStorage.getItem('obelii_region_pref');
+              if (savedRegion) setRegionPref(savedRegion);
             } catch (e) {
               console.error("Error restoring session", e);
             }
@@ -265,16 +336,6 @@ export default function App() {
       }
     };
     restoreSession();
-
-    // Load member interactive wishlist & pre-orders
-    const savedWishlist = localStorage.getItem('obelii_wishlist');
-    if (savedWishlist) {
-      try { setWishlist(JSON.parse(savedWishlist)); } catch (e) {}
-    }
-    const savedPreorders = localStorage.getItem('obelii_preorders');
-    if (savedPreorders) {
-      try { setPreorders(JSON.parse(savedPreorders)); } catch (e) {}
-    }
   }, []);
 
   // Countdown timer effect
@@ -305,10 +366,21 @@ export default function App() {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (!session) {
-            setCurrentUser(null);
-            localStorage.removeItem('obelii_current_member');
-            setActiveView('signin');
-            setAuthError('Please sign in to access the private VIP Lounge.');
+             setCurrentUser(null);
+             localStorage.removeItem('obelii_current_member');
+             setActiveView('signin');
+             setAuthError('Please sign in to access the private VIP Lounge.');
+          } else {
+             // Sync wishlist and preorders from database
+             try {
+               const userId = session.user.id;
+               const { data: wishData } = await supabase.from('wishlist_items').select('product_id').eq('user_id', userId);
+               const { data: preData } = await supabase.from('preorders').select('product_id').eq('user_id', userId);
+               if (wishData) setWishlist(wishData.map(w => w.product_id));
+               if (preData) setPreorders(preData.map(p => p.product_id));
+             } catch (dbErr) {
+               console.log("Database syncing error in protectRoute, continuing with local state.");
+             }
           }
         } catch (err) {
           console.error("Error verifying route protection session", err);
@@ -345,7 +417,7 @@ export default function App() {
   }, []);
 
   // Handle Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!email) {
@@ -363,40 +435,76 @@ export default function App() {
 
     setStatus('loading');
 
-    // Simulate luxury API network delay
-    setTimeout(() => {
-      const savedList = localStorage.getItem('obelii_waitlist');
-      let currentList: WaitlistEntry[] = [];
-      if (savedList) {
-        try {
-          currentList = JSON.parse(savedList);
-        } catch (e) {}
+    try {
+      // 1. Try to check duplicate in Supabase waitlist table
+      let isDuplicate = false;
+      try {
+        const { data: duplicateData } = await supabase.from('waitlist').select('id').eq('email', email).limit(1);
+        if (duplicateData && duplicateData.length > 0) {
+          isDuplicate = true;
+        }
+      } catch (dbErr) {
+        console.log("Error querying duplicate from Supabase, using localStorage.", dbErr);
+        const savedList = localStorage.getItem('obelii_waitlist');
+        if (savedList) {
+          const currentList: WaitlistEntry[] = JSON.parse(savedList);
+          isDuplicate = currentList.some(entry => entry.email.toLowerCase() === email.toLowerCase());
+        }
       }
 
-      const isDuplicate = currentList.some(entry => entry.email.toLowerCase() === email.toLowerCase());
       if (isDuplicate) {
         setErrorMessage('This email is already registered on our waitlist.');
         setStatus('error');
         return;
       }
 
-      const newPosition = totalSignups + 1;
+      // 2. Compute next queue position
+      let nextPos = totalSignups + 1;
+      try {
+        const { data: maxPosData } = await supabase.from('waitlist').select('position').order('position', { ascending: false }).limit(1);
+        if (maxPosData && maxPosData.length > 0) {
+          nextPos = maxPosData[0].position + 1;
+        }
+      } catch (dbErr) {
+        console.log("Could not compute next position via Supabase, using default.", dbErr);
+      }
+
+      // 3. Insert into Supabase waitlist table
       const newEntry: WaitlistEntry = {
         email: email,
         timestamp: new Date().toISOString(),
-        position: newPosition
+        position: nextPos
       };
 
+      try {
+        await supabase.from('waitlist').insert({
+          email: email,
+          position: nextPos,
+          created_at: newEntry.timestamp
+        });
+      } catch (dbErr) {
+        console.log("Failed to insert into Supabase waitlist, saving locally.", dbErr);
+      }
+
+      // 4. Update local states and localStorage fallback
+      const savedList = localStorage.getItem('obelii_waitlist');
+      let currentList: WaitlistEntry[] = [];
+      if (savedList) {
+        try { currentList = JSON.parse(savedList); } catch (e) {}
+      }
       const updatedList = [newEntry, ...currentList];
       localStorage.setItem('obelii_waitlist', JSON.stringify(updatedList));
-      localStorage.setItem('obelii_total_signups', newPosition.toString());
-      
+      localStorage.setItem('obelii_total_signups', nextPos.toString());
+
       setWaitlist(updatedList);
-      setTotalSignups(newPosition);
-      setQueuePosition(newPosition);
-      setReferralCode(`OBELII-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${newPosition}`);
+      setTotalSignups(nextPos);
+      setQueuePosition(nextPos);
+      setReferralCode(`OBELII-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${nextPos}`);
       setStatus('success');
-    }, 1200);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'An error occurred while joining the waitlist.');
+      setStatus('error');
+    }
   };
 
   // Handle VIP Member Sign In
@@ -431,26 +539,77 @@ export default function App() {
         return;
       }
 
-      // Successful login
+      // Successful login - Fetch profile details
       const userEmail = data.user?.email || signinEmail;
+      const userId = data.user?.id;
       const userName = data.user?.user_metadata?.name || userEmail.split('@')[0];
-      const userId = data.user?.id || `OB-${Math.floor(10200 + Math.random() * 89000)}`;
 
-      const loggedInUser: MemberUser = {
+      let profile = null;
+      try {
+        const { data: pData } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+        profile = pData;
+        if (!profile) {
+          const defaultProfile = {
+            id: userId,
+            name: userName,
+            email: userEmail,
+            tier: "FOUNDING MEMBER",
+            points: 100,
+            region_preference: "European Union"
+          };
+          await supabase.from('profiles').insert(defaultProfile);
+          profile = defaultProfile;
+        }
+      } catch (pErr) {
+        console.log("Profiles table might not exist yet, using mock fallback.", pErr);
+      }
+
+      const resolvedProfile = profile || {
+        id: userId,
         name: userName,
         email: userEmail,
-        id: userId,
-        joinedAt: data.user?.created_at || new Date().toISOString(),
         tier: "FOUNDING MEMBER",
-        points: 100
+        points: 100,
+        region_preference: "European Union"
+      };
+
+      // Fetch wishlist and preorders
+      let resolvedWishlist: string[] = [];
+      let resolvedPreorders: string[] = [];
+      try {
+        const { data: wishData } = await supabase.from('wishlist_items').select('product_id').eq('user_id', userId);
+        if (wishData) resolvedWishlist = wishData.map(w => w.product_id);
+        
+        const { data: preData } = await supabase.from('preorders').select('product_id').eq('user_id', userId);
+        if (preData) resolvedPreorders = preData.map(p => p.product_id);
+      } catch (dbErr) {
+        console.log("Wishlist/Preorders tables might not exist yet, fallback to localStorage.", dbErr);
+        const savedWishlist = localStorage.getItem('obelii_wishlist');
+        if (savedWishlist) resolvedWishlist = JSON.parse(savedWishlist);
+        const savedPreorders = localStorage.getItem('obelii_preorders');
+        if (savedPreorders) resolvedPreorders = JSON.parse(savedPreorders);
+      }
+
+      setWishlist(resolvedWishlist);
+      setPreorders(resolvedPreorders);
+      setRegionPref(resolvedProfile.region_preference || 'European Union');
+
+      const loggedInUser: MemberUser = {
+        name: resolvedProfile.name,
+        email: resolvedProfile.email,
+        id: resolvedProfile.id,
+        joinedAt: data.user?.created_at || new Date().toISOString(),
+        tier: resolvedProfile.tier,
+        points: resolvedProfile.points
       };
 
       setCurrentUser(loggedInUser);
       localStorage.setItem('obelii_current_member', JSON.stringify(loggedInUser));
+      localStorage.setItem('obelii_region_pref', resolvedProfile.region_preference || 'European Union');
       
-      setActiveView('waitlist'); // Redirect to Home ("/")
+      setActiveView('member'); // Redirect to Member Lounge view
       setAuthLoading(false);
-      triggerBoutiqueNotification(`Welcome back, ${userName}. Signed in successfully.`);
+      triggerBoutiqueNotification(`Welcome back, ${resolvedProfile.name}. Signed in successfully.`);
     } catch (err: any) {
       setAuthError(err?.message || 'An unexpected error occurred during sign-in.');
       setAuthLoading(false);
@@ -503,22 +662,44 @@ export default function App() {
         await supabase.auth.signOut();
       }
 
-      // Auto-add signup email to general waitlist if not already present
-      const savedList = localStorage.getItem('obelii_waitlist');
-      let currentWaitlist: WaitlistEntry[] = [];
-      if (savedList) {
-        try { currentWaitlist = JSON.parse(savedList); } catch (err) {}
-      }
-      if (!currentWaitlist.some(entry => entry.email.toLowerCase() === signupEmail.toLowerCase())) {
-        const newWaitlistEntry: WaitlistEntry = {
-          email: signupEmail,
-          timestamp: new Date().toISOString(),
-          position: totalSignups + 1
-        };
-        const updatedWaitlist = [newWaitlistEntry, ...currentWaitlist];
-        setWaitlist(updatedWaitlist);
-        localStorage.setItem('obelii_waitlist', JSON.stringify(updatedWaitlist));
-        setTotalSignups(totalSignups + 1);
+      // Auto-add signup email to general waitlist if not already present in Supabase
+      try {
+        const { data: dupData } = await supabase.from('waitlist').select('id').eq('email', signupEmail).limit(1);
+        if (!dupData || dupData.length === 0) {
+          const { data: maxPosData } = await supabase.from('waitlist').select('position').order('position', { ascending: false }).limit(1);
+          const nextPos = maxPosData && maxPosData.length > 0 ? maxPosData[0].position + 1 : 1284;
+          
+          await supabase.from('waitlist').insert({
+            email: signupEmail,
+            position: nextPos
+          });
+
+          const newWaitlistEntry: WaitlistEntry = {
+            email: signupEmail,
+            timestamp: new Date().toISOString(),
+            position: nextPos
+          };
+          setWaitlist(prev => [newWaitlistEntry, ...prev]);
+          setTotalSignups(nextPos);
+        }
+      } catch (dbErr) {
+        console.log("Failed to register waitlist entry on signup. Using localStorage.", dbErr);
+        const savedList = localStorage.getItem('obelii_waitlist');
+        let currentWaitlist: WaitlistEntry[] = [];
+        if (savedList) {
+          try { currentWaitlist = JSON.parse(savedList); } catch (err) {}
+        }
+        if (!currentWaitlist.some(entry => entry.email.toLowerCase() === signupEmail.toLowerCase())) {
+          const newWaitlistEntry: WaitlistEntry = {
+            email: signupEmail,
+            timestamp: new Date().toISOString(),
+            position: totalSignups + 1
+          };
+          const updatedWaitlist = [newWaitlistEntry, ...currentWaitlist];
+          setWaitlist(updatedWaitlist);
+          localStorage.setItem('obelii_waitlist', JSON.stringify(updatedWaitlist));
+          setTotalSignups(totalSignups + 1);
+        }
       }
 
       // Pre-fill the email they just used into the Sign In form
@@ -655,13 +836,30 @@ export default function App() {
   };
 
   // Toggle Item Wishlist
-  const toggleWishlist = (productId: string) => {
+  const toggleWishlist = async (productId: string) => {
     let updated: string[];
     if (wishlist.includes(productId)) {
       updated = wishlist.filter(id => id !== productId);
+      if (currentUser) {
+        try {
+          await supabase.from('wishlist_items').delete().eq('user_id', currentUser.id).eq('product_id', productId);
+        } catch (e) {
+          console.log("Error removing from database wishlist, continuing locally.", e);
+        }
+      }
       triggerBoutiqueNotification('Item removed from wishlist.');
     } else {
       updated = [...wishlist, productId];
+      if (currentUser) {
+        try {
+          await supabase.from('wishlist_items').insert({
+            user_id: currentUser.id,
+            product_id: productId
+          });
+        } catch (e) {
+          console.log("Error inserting to database wishlist, continuing locally.", e);
+        }
+      }
       triggerBoutiqueNotification('Item added to wishlist.');
     }
     setWishlist(updated);
@@ -669,13 +867,30 @@ export default function App() {
   };
 
   // Toggle Item Pre-Order
-  const togglePreorder = (productId: string) => {
+  const togglePreorder = async (productId: string) => {
     let updated: string[];
     if (preorders.includes(productId)) {
       updated = preorders.filter(id => id !== productId);
+      if (currentUser) {
+        try {
+          await supabase.from('preorders').delete().eq('user_id', currentUser.id).eq('product_id', productId);
+        } catch (e) {
+          console.log("Error removing from database preorders, continuing locally.", e);
+        }
+      }
       triggerBoutiqueNotification('Priority reservation cancelled.');
     } else {
       updated = [...preorders, productId];
+      if (currentUser) {
+        try {
+          await supabase.from('preorders').insert({
+            user_id: currentUser.id,
+            product_id: productId
+          });
+        } catch (e) {
+          console.log("Error inserting to database preorders, continuing locally.", e);
+        }
+      }
       triggerBoutiqueNotification('Priority reservation secured. Production queue updated.');
     }
     setPreorders(updated);
@@ -724,15 +939,40 @@ export default function App() {
   };
 
   // Delete Member Account
-  const handleDeleteMembership = () => {
+  const handleDeleteMembership = async () => {
     if (!currentUser) return;
 
-    // Filter current user out from registered members list
-    const updatedMembers = members.filter(m => m.email.toLowerCase() !== currentUser.email.toLowerCase());
-    setMembers(updatedMembers);
-    localStorage.setItem('obelii_members', JSON.stringify(updatedMembers));
+    try {
+      // 1. Delete user profiles, wishlist, and preorders from Supabase database
+      const userId = currentUser.id;
+      try {
+        await supabase.from('wishlist_items').delete().eq('user_id', userId);
+        await supabase.from('preorders').delete().eq('user_id', userId);
+        await supabase.from('profiles').delete().eq('id', userId);
+      } catch (dbErr) {
+        console.log("Failed to delete database entries for user. Continuing.", dbErr);
+      }
 
-    // Remove active member session
+      // 2. Sign out of Supabase auth
+      try {
+        await supabase.auth.signOut();
+      } catch (authErr) {
+        console.log("Auth signout failed.", authErr);
+      }
+
+      // 3. Clear states and local storage fallback
+      const updatedMembers = members.filter(m => m.email.toLowerCase() !== currentUser.email.toLowerCase());
+      setMembers(updatedMembers);
+      localStorage.setItem('obelii_members', JSON.stringify(updatedMembers));
+      localStorage.removeItem('obelii_wishlist');
+      localStorage.removeItem('obelii_preorders');
+      setWishlist([]);
+      setPreorders([]);
+      setRegionPref('European Union');
+    } catch (err) {
+      console.error("Error deleting member session", err);
+    }
+
     setCurrentUser(null);
     localStorage.removeItem('obelii_current_member');
 
@@ -751,9 +991,14 @@ export default function App() {
     triggerBoutiqueNotification('Account deleted successfully.');
   };
 
-  // Clear Waitlist Local Storage
-  const clearWaitlist = () => {
+  // Clear Waitlist Local Storage & Supabase waitlist table
+  const clearWaitlist = async () => {
     if (window.confirm("Are you sure you want to completely clear the waitlist data?")) {
+      try {
+        await supabase.from('waitlist').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
+      } catch (dbErr) {
+        console.log("Failed to clear Supabase waitlist table.", dbErr);
+      }
       localStorage.removeItem('obelii_waitlist');
       localStorage.setItem('obelii_total_signups', '1283');
       setWaitlist([]);
@@ -1640,14 +1885,21 @@ export default function App() {
                   
                   <div className="flex flex-wrap gap-2 justify-center">
                     {['North America', 'European Union', 'United Kingdom', 'Asia-Pacific', 'Middle East'].map((region) => {
-                      const savedRegion = localStorage.getItem('obelii_region_pref') || 'European Union';
-                      const isSelected = savedRegion === region;
+                      const isSelected = regionPref === region;
                       
                       return (
                         <button
                           key={region}
-                          onClick={() => {
+                          onClick={async () => {
+                            setRegionPref(region);
                             localStorage.setItem('obelii_region_pref', region);
+                            if (currentUser) {
+                              try {
+                                await supabase.from('profiles').update({ region_preference: region }).eq('id', currentUser.id);
+                              } catch (e) {
+                                console.log("Failed to update region preference in Supabase profiles, continuing locally.", e);
+                              }
+                            }
                             triggerBoutiqueNotification(`Shipping preference set to ${region}.`);
                           }}
                           className={`px-3 py-1.5 rounded-full text-[9px] font-light transition-all duration-300 cursor-pointer ${
