@@ -498,34 +498,11 @@ export default function App() {
         return;
       }
 
-      // Successful signup but requires email verification
-      if (!data.session) {
-        setAuthSuccessMessage("Check your email and confirm your account before logging in.");
-        setAuthLoading(false);
-        return;
+      // If a session was somehow auto-established, sign out to enforce the "no auto-login" rule
+      if (data.session) {
+        await supabase.auth.signOut();
       }
 
-      // Successful signup with auto-login (direct session returned)
-      const userEmail = data.user?.email || signupEmail;
-      const userName = data.user?.user_metadata?.name || signupName;
-      const userId = data.user?.id || `OB-${Math.floor(10200 + Math.random() * 89000)}`;
-
-      const newMember: MemberUser = {
-        name: userName,
-        email: userEmail,
-        id: userId,
-        joinedAt: data.user?.created_at || new Date().toISOString(),
-        tier: "FOUNDING MEMBER",
-        points: 100
-      };
-
-      const updatedMembers = [...members, newMember];
-      setMembers(updatedMembers);
-      localStorage.setItem('obelii_members', JSON.stringify(updatedMembers));
-      
-      setCurrentUser(newMember);
-      localStorage.setItem('obelii_current_member', JSON.stringify(newMember));
-      
       // Auto-add signup email to general waitlist if not already present
       const savedList = localStorage.getItem('obelii_waitlist');
       let currentWaitlist: WaitlistEntry[] = [];
@@ -544,9 +521,21 @@ export default function App() {
         setTotalSignups(totalSignups + 1);
       }
 
-      setActiveView('waitlist'); // Redirect to Home ("/")
+      // Pre-fill the email they just used into the Sign In form
+      setSigninEmail(signupEmail);
+
+      // Reset signup form fields
+      setSignupName('');
+      setSignupEmail('');
+      setSignupPassword('');
+
+      // Show success verification instructions message on Sign In page
+      setAuthSuccessMessage("Your account has been created. Please check your email and verify your address before logging in.");
+
+      // Redirect the user to the Sign In page
+      setActiveView('signin');
       setAuthLoading(false);
-      triggerBoutiqueNotification('Account created successfully. Welcome to Obelii.');
+      triggerBoutiqueNotification('Account created. Check your email to verify.');
     } catch (err: any) {
       setAuthError(err?.message || 'An unexpected error occurred during sign-up.');
       setAuthLoading(false);
@@ -1015,14 +1004,14 @@ export default function App() {
                         ) : (
                           <>
                             <button 
-                              onClick={() => { setActiveView('signin'); setAuthError(''); }} 
+                              onClick={() => { setActiveView('signin'); setAuthError(''); setAuthSuccessMessage(''); }} 
                               className="text-[#00e154] hover:underline hover:text-[#00e154]/80 transition-colors font-medium flex items-center gap-1"
                             >
                               <LogIn className="w-3.5 h-3.5" /> Sign In
                             </button>
                             <span className="text-white/10">|</span>
                             <button 
-                              onClick={() => { setActiveView('signup'); setAuthError(''); }} 
+                              onClick={() => { setActiveView('signup'); setAuthError(''); setAuthSuccessMessage(''); }} 
                               className="text-white/60 hover:text-white hover:underline transition-colors flex items-center gap-1"
                             >
                               <UserPlus className="w-3.5 h-3.5" /> Create Account
@@ -1097,7 +1086,7 @@ export default function App() {
                       <div className="text-xs text-white/25 mt-3 pt-3 border-t border-white/5 w-64">
                         Want boutique options now?{' '}
                         <button 
-                          onClick={() => { setActiveView('signup'); setAuthError(''); }} 
+                          onClick={() => { setActiveView('signup'); setAuthError(''); setAuthSuccessMessage(''); }} 
                           className="text-[#00e154] hover:underline"
                         >
                           Create Account
@@ -1229,13 +1218,13 @@ export default function App() {
                 {/* Footer Switch */}
                 <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center text-xs text-white/40">
                   <button 
-                    onClick={() => { setActiveView('waitlist'); setAuthError(''); }} 
+                    onClick={() => { setActiveView('waitlist'); setAuthError(''); setAuthSuccessMessage(''); }} 
                     className="flex items-center gap-1.5 hover:text-white transition-colors"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" /> Return to Waitlist
                   </button>
                   <button 
-                    onClick={() => { setActiveView('signup'); setAuthError(''); }} 
+                    onClick={() => { setActiveView('signup'); setAuthError(''); setAuthSuccessMessage(''); }} 
                     className="text-[#00e154] hover:underline font-medium"
                   >
                     Create Account
@@ -1372,13 +1361,13 @@ export default function App() {
                 {/* Footer Switch */}
                 <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center text-xs text-white/40">
                   <button 
-                    onClick={() => { setActiveView('waitlist'); setAuthError(''); }} 
+                    onClick={() => { setActiveView('waitlist'); setAuthError(''); setAuthSuccessMessage(''); }} 
                     className="flex items-center gap-1.5 hover:text-white transition-colors"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" /> Return to Waitlist
                   </button>
                   <button 
-                    onClick={() => { setActiveView('signin'); setAuthError(''); }} 
+                    onClick={() => { setActiveView('signin'); setAuthError(''); setAuthSuccessMessage(''); }} 
                     className="text-[#00e154] hover:underline font-medium"
                   >
                     Already have an account?
